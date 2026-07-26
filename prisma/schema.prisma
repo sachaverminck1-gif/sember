@@ -1,0 +1,314 @@
+// ============================================================
+// Find-Jardinier — Schéma de données MVP
+// Multi-tenant strict : toute donnée métier porte un jardinierId.
+// Métier en français, technique en anglais (convention projet).
+// ============================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Enums ----------
+
+enum Plan {
+  STARTER // 19 € — 15 clients max, 1 utilisateur
+  PRO // 49 € — clients illimités, relances, export compta
+  BUSINESS // 99 € — multi-employés + stats
+}
+
+enum SubscriptionStatus {
+  TRIAL // essai 7 jours en cours
+  ACTIVE // abonnement Stripe payé
+  PAST_DUE // paiement en échec
+  LOCKED // essai expiré sans paiement → lecture seule
+  CANCELED // abonnement résilié
+}
+
+enum Role {
+  OWNER // propriétaire du compte
+  EMPLOYE // compte employé rattaché (plan Business)
+}
+
+enum StatutDevis {
+  BROUILLON
+  ENVOYE
+  ACCEPTE
+  REFUSE
+}
+
+enum StatutFacture {
+  BROUILLON
+  EMISE
+  PAYEE
+  ANNULEE
+}
+
+enum StatutIntervention {
+  PLANIFIEE
+  TERMINEE
+  ANNULEE
+}
+
+enum FrequenceFormule {
+  HEBDOMADAIRE
+  BIMENSUELLE // 2 passages par mois
+  MENSUELLE
+  TRIMESTRIELLE
+}
+
+enum StatutAbonnement {
+  ACTIF
+  SUSPENDU
+  RESILIE
+}
+
+enum StatutEcheance {
+  A_VENIR
+  EFFECTUEE
+  MANQUEE
+}
+
+// ---------- Compte / tenant ----------
+
+model Jardinier {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  passwordHash String
+  nom          String
+  entreprise   String?
+  telephone    String?
+  siret        String?
+  // TVA : franchise en base (auto-entrepreneur) ou assujetti (D2)
+  assujettiTVA Boolean @default(false)
+
+  // Abonnement SaaS (D6/D7/D8/D9)
+  plan               Plan               @default(STARTER)
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  trialEndsAt        DateTime // inscription + 7 jours
+  stripeCustomerId   String?            @unique
+  stripeSubId        String?            @unique
+
+  // Multi-employés (plan Business) : un employé pointe vers son owner
+  role     Role        @default(OWNER)
+  parentId String?
+  parent   Jardinier?  @relation("Equipe", fields: [parentId], references: [id])
+  employes Jardinier[] @relation("Equipe")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clients       Client[]
+  prestations   Prestation[]
+  devis         Devis[]
+  factures      Facture[]
+  interventions Intervention[]
+  formules      Formule[]
+  abonnements   Abonnement[]
+
+  @@index([parentId])
+}
+
+// ---------- Clients du jardinier ----------
+
+model Client {
+  id          String     @id @default(cuid())
+  jardinierId String
+  jardinier   Jardinier  @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  nom         String
+  adresse     String?
+  codePostal  String?
+  ville       String?
+  telephone   String?
+  email       String?
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  devis         Devis[]
+  factures      Facture[]
+  interventions Intervention[]
+  abonnements   Abonnement[]
+
+  @@index([jardinierId])
+}
+
+// ---------- Catalogue de prestations ----------
+
+model Prestation {
+  id           String    @id @default(cuid())
+  jardinierId  String
+  jardinier    Jardinier @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  nom          String
+  prixUnitaire Decimal   @db.Decimal(10, 2)
+  unite        String    @default("heure") // heure, m², forfait…
+  tauxTVA      Decimal   @default(20) @db.Decimal(4, 2) // ignoré si franchise
+
+  // Champs dormants crédit d'impôt (phase 2 — avance immédiate URSSAF SAP)
+  eligibleCreditImpot Boolean @default(true) // petits travaux de jardinage = éligible SAP
+  categorieSAP        String? // code activité services à la personne
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jardinierId])
+}
+
+// ---------- Devis ----------
+
+model Devis {
+  id          String      @id @default(cuid())
+  jardinierId String
+  jardinier   Jardinier   @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  numero      Int // séquentiel PAR jardinier
+  statut      StatutDevis @default(BROUILLON)
+  objet       String?
+  dateDevis   DateTime    @default(now())
+  validiteJours Int       @default(30)
+  notes       String?
+
+  lignes  LigneDevis[]
+  facture Facture? // facture générée depuis ce devis (conversion)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([jardinierId, numero])
+  @@index([jardinierId])
+  @@index([clientId])
+}
+
+model LigneDevis {
+  id           String  @id @default(cuid())
+  devisId      String
+  devis        Devis   @relation(fields: [devisId], references: [id], onDelete: Cascade)
+  designation  String
+  quantite     Decimal @db.Decimal(10, 2)
+  prixUnitaire Decimal @db.Decimal(10, 2)
+  tauxTVA      Decimal @default(0) @db.Decimal(4, 2) // 0 si franchise
+  ordre        Int     @default(0)
+
+  @@index([devisId])
+}
+
+// ---------- Factures ----------
+
+model Facture {
+  id          String        @id @default(cuid())
+  jardinierId String
+  jardinier   Jardinier     @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  devisId     String?       @unique
+  devis       Devis?        @relation(fields: [devisId], references: [id], onDelete: SetNull)
+  numero      Int // séquentiel PAR jardinier (basique MVP, D10)
+  statut      StatutFacture @default(BROUILLON)
+  objet       String?
+  dateEmission DateTime     @default(now())
+  dateEcheance DateTime?
+  notes       String?
+
+  lignes LigneFacture[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([jardinierId, numero])
+  @@index([jardinierId])
+  @@index([clientId])
+}
+
+model LigneFacture {
+  id           String  @id @default(cuid())
+  factureId    String
+  facture      Facture @relation(fields: [factureId], references: [id], onDelete: Cascade)
+  designation  String
+  quantite     Decimal @db.Decimal(10, 2)
+  prixUnitaire Decimal @db.Decimal(10, 2)
+  tauxTVA      Decimal @default(0) @db.Decimal(4, 2)
+  ordre        Int     @default(0)
+
+  @@index([factureId])
+}
+
+// ---------- Planning ----------
+
+model Intervention {
+  id          String             @id @default(cuid())
+  jardinierId String
+  jardinier   Jardinier          @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  titre       String
+  date        DateTime
+  dureeMinutes Int               @default(60)
+  statut      StatutIntervention @default(PLANIFIEE)
+  notes       String?
+  echeanceId  String?            @unique // si générée depuis une échéance d'abonnement
+  echeance    Echeance?          @relation(fields: [echeanceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jardinierId, date])
+  @@index([clientId])
+}
+
+// ---------- Abonnements d'entretien (formules récurrentes) ----------
+
+model Formule {
+  id          String           @id @default(cuid())
+  jardinierId String
+  jardinier   Jardinier        @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  nom         String // ex. "Formule Sérénité"
+  description String?
+  frequence   FrequenceFormule
+  prixMensuel Decimal          @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  abonnements Abonnement[]
+
+  @@index([jardinierId])
+}
+
+model Abonnement {
+  id          String           @id @default(cuid())
+  jardinierId String
+  jardinier   Jardinier        @relation(fields: [jardinierId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  formuleId   String
+  formule     Formule          @relation(fields: [formuleId], references: [id], onDelete: Restrict)
+  dateDebut   DateTime         @default(now())
+  statut      StatutAbonnement @default(ACTIF)
+
+  echeances Echeance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jardinierId])
+  @@index([clientId])
+}
+
+model Echeance {
+  id           String         @id @default(cuid())
+  abonnementId String
+  abonnement   Abonnement     @relation(fields: [abonnementId], references: [id], onDelete: Cascade)
+  datePrevue   DateTime
+  statut       StatutEcheance @default(A_VENIR)
+
+  intervention Intervention?
+
+  createdAt DateTime @default(now())
+
+  @@index([abonnementId, datePrevue])
+}

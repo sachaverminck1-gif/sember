@@ -1,26 +1,181 @@
 @import "tailwindcss";
 
+/* ============================================================
+   SEMBER — Design tokens
+   Marque : minimal-tech, neutres froids + un seul accent vert.
+   Réservez l'accent aux actions, liens et pins de carte.
+   ============================================================ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* --- Palette brute (ne pas utiliser directement dans les composants) --- */
+  --sember-ink:        #14181A;
+  --sember-neutral-60: #5F6764;
+  --sember-neutral-40: #8B928F;
+  --sember-neutral-20: #E4E6E2;
+  --sember-neutral-10: #EFF0EC;
+  --sember-paper:      #FBFBFA;
+  --sember-accent:     #17A46B;
+
+  /* --- Tokens sémantiques — thème clair --- */
+  --background:    var(--sember-paper);
+  --surface:       #FFFFFF;
+  --foreground:    var(--sember-ink);   /* texte principal */
+  --text-soft:     var(--sember-neutral-60);
+  --text-muted:    var(--sember-neutral-40);
+  --border:        var(--sember-neutral-20);
+  --border-subtle: var(--sember-neutral-10);
+
+  --accent:        var(--sember-accent);
+  --accent-hover:  #128A59;
+  --accent-active: #0E6E47;
+  --accent-weak:   rgba(23, 164, 107, 0.10);
+  --on-accent:     #FFFFFF;
+
+  --ring:          rgba(20, 24, 26, 0.08);
+  --focus:         var(--accent);
+
+  /* --- Rayons --- */
+  --radius-sm:  6px;
+  --radius-md:  9px;
+  --radius-lg:  12px;
+  --radius-xl:  14px;
+  --radius-pill: 999px;
 }
 
+/* Thème sombre — via préférence système… */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background:    #0C0F0E;
+    --surface:       #141A17;
+    --foreground:    #ECEEEC;
+    --text-soft:     #9AA39E;
+    --text-muted:    #6C756F;
+    --border:        #232B27;
+    --border-subtle: #1B211D;
+
+    --accent:        #2DBE80;
+    --accent-hover:  #3ACE8E;
+    --accent-active: #25A56E;
+    --accent-weak:   rgba(45, 190, 128, 0.12);
+    --on-accent:     #08110C;
+
+    --ring:          rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* …et override manuel prioritaire (toggle data-theme sur <html>) */
+:root[data-theme="light"] {
+  --background: var(--sember-paper); --surface: #FFFFFF; --foreground: var(--sember-ink);
+  --text-soft: var(--sember-neutral-60); --text-muted: var(--sember-neutral-40);
+  --border: var(--sember-neutral-20); --border-subtle: var(--sember-neutral-10);
+  --accent: var(--sember-accent); --accent-hover: #128A59; --accent-active: #0E6E47;
+  --accent-weak: rgba(23,164,107,0.10); --on-accent: #FFFFFF; --ring: rgba(20,24,26,0.08);
+}
+:root[data-theme="dark"] {
+  --background: #0C0F0E; --surface: #141A17; --foreground: #ECEEEC;
+  --text-soft: #9AA39E; --text-muted: #6C756F; --border: #232B27; --border-subtle: #1B211D;
+  --accent: #2DBE80; --accent-hover: #3ACE8E; --accent-active: #25A56E;
+  --accent-weak: rgba(45,190,128,0.12); --on-accent: #08110C; --ring: rgba(255,255,255,0.08);
+}
+
+/* ============================================================
+   Exposition à Tailwind — utilitaires : bg-surface, text-soft,
+   border-line, bg-accent, text-accent, rounded-md, etc.
+   ============================================================ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background:    var(--background);
+  --color-surface:       var(--surface);
+  --color-foreground:    var(--foreground);
+  --color-soft:          var(--text-soft);
+  --color-muted:         var(--text-muted);
+  --color-line:          var(--border);
+  --color-line-subtle:   var(--border-subtle);
+
+  --color-accent:        var(--accent);
+  --color-accent-hover:  var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-weak:   var(--accent-weak);
+  --color-on-accent:     var(--on-accent);
+
+  --radius-sm:  var(--radius-sm);
+  --radius-md:  var(--radius-md);
+  --radius-lg:  var(--radius-lg);
+  --radius-xl:  var(--radius-xl);
+
+  /* Geist déjà câblé dans layout.tsx. Pour passer à General Sans / Switzer,
+     remplacez ces deux lignes par la variable de la police chargée. */
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ============================================================
+   Base
+   ============================================================ */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus visible cohérent (accessibilité) */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ============================================================
+   Composants — boutons Sember
+   Usage : <button class="btn btn-primary">…</button>
+   Règle : un seul bouton plein (primary) par écran.
+   ============================================================ */
+@layer components {
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 0.92rem;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    padding: 0.62rem 1.15rem;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-primary   { background: var(--accent); color: var(--on-accent); }
+  .btn-primary:hover:not(:disabled)  { background: var(--accent-hover); }
+  .btn-primary:active:not(:disabled) { background: var(--accent-active); }
+
+  .btn-secondary { background: var(--surface); color: var(--foreground); border-color: var(--border); }
+  .btn-secondary:hover:not(:disabled) { border-color: var(--text-muted); }
+
+  .btn-ghost     { background: transparent; color: var(--accent); }
+  .btn-ghost:hover:not(:disabled) { background: var(--accent-weak); }
+
+  /* Carte / surface conteneur */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* Badge / pill (ex. « Disponible », note) */
+  .badge {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.04em;
+    padding: 0.28rem 0.6rem; border-radius: var(--radius-pill);
+    background: var(--accent-weak); color: var(--accent);
+  }
 }
